@@ -2,17 +2,20 @@ import numpy as np
 import pandas as pd
 
 
+MAX_ROAS = 999.99
+
+
 def compute_roas_range(revenue_lower, revenue_upper, spend_lower, spend_upper):
-    """
-    Compute blended ROAS range using cross-interval division.
-    ROAS = Revenue / Spend.
-    Lower bound uses worst case (lowest revenue / highest spend).
-    Upper bound uses best case (highest revenue / lowest spend).
-    """
-    if spend_lower < 1e-9:
+    if spend_upper < 1e-9:
         return 0.0, 0.0
-    roas_lower = revenue_lower / max(spend_upper, 1e-9)
-    roas_upper = revenue_upper / max(spend_lower, 1e-9)
+
+    roas_lower = revenue_lower / spend_upper
+
+    if spend_lower < 1e-9:
+        roas_upper = min(MAX_ROAS, revenue_upper / 1e-9)
+    else:
+        roas_upper = min(MAX_ROAS, revenue_upper / spend_lower)
+
     return float(roas_lower), float(roas_upper)
 
 

@@ -45,42 +45,40 @@ def run_inference(data_dir, model_path, output_path):
     print(f"  Campaigns at last date: {last_rows['campaign_name'].nunique()}")
 
     X_last = last_rows[feature_cols]
+    camp_names = last_rows["campaign_name"].values
+    channels = last_rows["channel"].values
+    camp_types = last_rows["campaign_type"].values
 
     forecasts = []
-    for idx, row in last_rows.iterrows():
-        camp_name = row["campaign_name"]
-        channel = row["channel"]
-        camp_type = row["campaign_type"]
-        x = X_last.loc[[idx]]
+    for h in horizons:
+        rev_lower = models[f"revenue_{h}d_lower"].predict(X_last)
+        rev_upper = models[f"revenue_{h}d_upper"].predict(X_last)
+        spend_lower = models[f"spend_{h}d_lower"].predict(X_last)
+        spend_upper = models[f"spend_{h}d_upper"].predict(X_last)
 
-        for h in horizons:
-            rev_lower = models[f"revenue_{h}d_lower"].predict(x)[0]
-            rev_upper = models[f"revenue_{h}d_upper"].predict(x)[0]
-            spend_lower = models[f"spend_{h}d_lower"].predict(x)[0]
-            spend_upper = models[f"spend_{h}d_upper"].predict(x)[0]
+        q = q_crit[f"revenue_{h}d"]
+        rev_lower -= q
+        rev_upper += q
+        qs = q_crit[f"spend_{h}d"]
+        spend_lower -= qs
+        spend_upper += qs
 
-            q = q_crit[f"revenue_{h}d"]
-            rev_lower -= q
-            rev_upper += q
-            qs = q_crit[f"spend_{h}d"]
-            spend_lower -= qs
-            spend_upper += qs
+        rev_lower = np.maximum(rev_lower, 0)
+        rev_upper = np.maximum(rev_upper, 0)
+        spend_lower = np.maximum(spend_lower, 0)
+        spend_upper = np.maximum(spend_upper, 0)
 
-            rev_lower = max(rev_lower, 0)
-            rev_upper = max(rev_upper, 0)
-            spend_lower = max(spend_lower, 0)
-            spend_upper = max(spend_upper, 0)
-
+        for i in range(len(camp_names)):
             forecasts.append({
                 "horizon": h,
                 "level": "campaign",
-                "group": camp_name,
-                "channel": channel,
-                "campaign_type": camp_type,
-                "revenue_lower": rev_lower,
-                "revenue_upper": rev_upper,
-                "spend_lower": spend_lower,
-                "spend_upper": spend_upper,
+                "group": camp_names[i],
+                "channel": channels[i],
+                "campaign_type": camp_types[i],
+                "revenue_lower": rev_lower[i],
+                "revenue_upper": rev_upper[i],
+                "spend_lower": spend_lower[i],
+                "spend_upper": spend_upper[i],
             })
 
     fc_df = pd.DataFrame(forecasts)
