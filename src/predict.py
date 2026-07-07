@@ -13,12 +13,17 @@ from roas import build_predictions
 from utils import set_seeds
 
 
-def run_inference(data_dir, model_path, output_path):
+def run_inference(data_dir, model_path, output_path, budget_multiplier=1.0):
     set_seeds(42)
 
     print("Loading data...")
     df = load_all_data(data_dir)
     df = fill_missing_dates(df)
+
+    if budget_multiplier != 1.0:
+        df["daily_budget"] = df["daily_budget"] * budget_multiplier
+        print(f"  Budget scaled by {budget_multiplier}x")
+
     print(f"  Rows: {df.shape}")
 
     print("Loading model...")
@@ -143,6 +148,10 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", default="./data")
     parser.add_argument("--model", default="./pickle/model.pkl")
     parser.add_argument("--output", default="./output/predictions.csv")
+    parser.add_argument("--budget-multiplier", type=float, default=1.0)
     args = parser.parse_args()
 
-    run_inference(args.data_dir, args.model, args.output)
+    run_inference(
+        args.data_dir, args.model, args.output,
+        budget_multiplier=args.budget_multiplier,
+    )
