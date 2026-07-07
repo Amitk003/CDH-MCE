@@ -40,28 +40,6 @@ def train_quantile_model(X, y, alpha, params=None):
     return model
 
 
-def conformal_calibrate(models, X_cal, y_cal, horizons):
-    q_crit = {}
-    for h in horizons:
-        for metric in ["revenue", "spend"]:
-            key = f"{metric}_{h}d"
-            lower_key = f"{key}_lower"
-            upper_key = f"{key}_upper"
-            model_lower = models[lower_key]
-            model_upper = models[upper_key]
-
-            pred_lower = model_lower.predict(X_cal)
-            pred_upper = model_upper.predict(X_cal)
-
-            y_true = y_cal[f"{metric}_target_{h}d"].values
-
-            scores = np.maximum(pred_lower - y_true, y_true - pred_upper)
-            scores = np.maximum(scores, 0)
-            q_crit[key] = float(np.percentile(scores, CONFORMAL_COVERAGE * 100))
-
-    return q_crit
-
-
 def run_training(data_dir, model_out, params=None):
     set_seeds(42)
 
@@ -86,39 +64,57 @@ def run_training(data_dir, model_out, params=None):
     )
 
     target_cols = [c for c in merged.columns if "target" in c]
-    merged.dropna(subset=target_cols, inplace=True)
-    print(f"  After target merge + dropna: {merged.shape}")
+    print(f"  After target merge: {merged.shape}")
 
     all_dates = sorted(merged["date"].unique())
     split_idx = int(len(all_dates) * 0.8)
     train_dates = set(all_dates[:split_idx])
     cal_dates = set(all_dates[split_idx:])
 
-    train_df = merged[merged["date"].isin(train_dates)].copy()
-    cal_df = merged[merged["date"].isin(cal_dates)].copy()
-    print(f"  Train rows: {train_df.shape}, Cal rows: {cal_df.shape}")
-
-    X_train = train_df[feature_cols]
-    X_cal = cal_df[feature_cols]
+    base_train = merged[merged["date"].isin(train_dates)].copy()
+    base_cal = merged[merged["date"].isin(cal_dates)].copy()
+    print(f"  Base train rows: {base_train.shape}, Cal rows: {base_cal.shape}")
 
     models = {}
     for h in HORIZONS:
         for metric in ["revenue", "spend"]:
             target = f"{metric}_target_{h}d"
-            y_train = train_df[target].values
 
-            print(f"  Training {metric} {h}d lower (q={QUANTILE_LOWER})...")
+            train_df = base_train.dropna(subset=[target])
+            y_train = train_df[target].values
+            X_train = train_df[feature_cols]
+
+            print(f"  Training {metric} {h}d ({train_df.shape[0]} rows, q={QUANTILE_LOWER})...")
             models[f"{metric}_{h}d_lower"] = train_quantile_model(
                 X_train, y_train, QUANTILE_LOWER, params
             )
 
-            print(f"  Training {metric} {h}d upper (q={QUANTILE_UPPER})...")
+            print(f"  Training {metric} {h}d ({train_df.shape[0]} rows, q={QUANTILE_UPPER})...")
             models[f"{metric}_{h}d_upper"] = train_quantile_model(
                 X_train, y_train, QUANTILE_UPPER, params
             )
 
     print("Running conformal calibration...")
-    q_crit = conformal_calibrate(models, X_cal, cal_df, HORIZONS)
+    q_crit = {}
+    for h in HORIZONS:
+        for metric in ["revenue", "spend"]:
+            key = f"{metric}_{h}d"
+            cal_df = base_cal.dropna(subset=[f"{metric}_target_{h}d"])
+            X_cal = cal_df[feature_cols]
+            y_cal = cal_df
+            lower_key = f"{key}_lower"
+            upper_key = f"{key}_upper"
+            model_lower = models[lower_key]
+            model_upper = models[upper_key]
+
+            pred_lower = model_lower.predict(X_cal)
+            pred_upper = model_upper.predict(X_cal)
+
+            y_true = y_cal[f"{metric}_target_{h}d"].values
+            scores = np.maximum(pred_lower - y_true, y_true - pred_upper)
+            scores = np.maximum(scores, 0)
+            q_crit[key] = float(np.percentile(scores, CONFORMAL_COVERAGE * 100))
+
     for k, v in q_crit.items():
         print(f"  q_crit[{k}] = {v:.4f}")
 
