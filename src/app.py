@@ -21,9 +21,9 @@ st.set_page_config(
 )
 
 
-def load_forecast(data_dir, model_path):
+def load_forecast(data_dir, model_path, budget_multiplier=1.0):
     output_path = "output/ui_predictions.csv"
-    run_inference(data_dir, model_path, output_path)
+    run_inference(data_dir, model_path, output_path, budget_multiplier=budget_multiplier)
     return pd.read_csv(output_path)
 
 
@@ -132,7 +132,10 @@ def main():
     if run_button:
         with st.spinner("Running forecast..."):
             try:
-                pdf = load_forecast(data_dir, model_path)
+                pdf = load_forecast(
+                    data_dir, model_path,
+                    budget_multiplier=budget_multiplier if enable_budget else 1.0,
+                )
                 st.session_state["forecast_df"] = pdf
                 st.session_state["forecast_ready"] = True
                 st.success("Forecast complete!")
