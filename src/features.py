@@ -8,7 +8,9 @@ ROLLING_WINDOWS = [7, 14, 30]
 
 def _compute_rolling(group, col, windows, suffix="sum"):
     for w in windows:
-        group[f"{col}_{w}d_{suffix}"] = group[col].shift(1).rolling(w).sum()
+        group[f"{col}_{w}d_{suffix}"] = (
+            group[col].shift(1).rolling(w, min_periods=1).sum().fillna(0)
+        )
     return group
 
 
@@ -27,12 +29,12 @@ def _adstock(series, decay=0.5):
 
 
 def _compute_metrics(group):
-    group["cpc"] = group["spend"] / group["clicks"].replace(0, np.nan)
-    group["cpm"] = group["spend"] / group["impressions"].replace(0, np.nan) * 1000
-    group["ctr"] = group["clicks"] / group["impressions"].replace(0, np.nan) * 100
-    group["conversion_rate"] = group["conversions"] / group["clicks"].replace(0, np.nan)
-    group["roas"] = group["revenue"] / group["spend"].replace(0, np.nan)
-    group["budget_util"] = group["spend"] / group["daily_budget"].replace(0, np.nan)
+    group["cpc"] = (group["spend"] / group["clicks"].replace(0, np.nan)).fillna(0)
+    group["cpm"] = (group["spend"] / group["impressions"].replace(0, np.nan) * 1000).fillna(0)
+    group["ctr"] = (group["clicks"] / group["impressions"].replace(0, np.nan) * 100).fillna(0)
+    group["conversion_rate"] = (group["conversions"] / group["clicks"].replace(0, np.nan)).fillna(0)
+    group["roas"] = (group["revenue"] / group["spend"].replace(0, np.nan)).fillna(0)
+    group["budget_util"] = (group["spend"] / group["daily_budget"].replace(0, np.nan)).fillna(0)
     return group
 
 
@@ -41,7 +43,7 @@ def _compute_rolling_metrics(group, windows):
         for col in ["cpc", "cpm", "ctr", "conversion_rate", "roas", "budget_util"]:
             if col in group.columns:
                 group[f"{col}_{w}d_avg"] = (
-                    group[col].shift(1).rolling(w).mean()
+                    group[col].shift(1).rolling(w, min_periods=1).mean().fillna(0)
                 )
     return group
 
@@ -110,35 +112,52 @@ def build_aggregate_features(df):
     agg.columns = ["date", "agg_spend", "agg_revenue", "agg_clicks",
                    "agg_impressions", "agg_conversions"]
 
-    # compute aggregate-only features
-    agg["agg_cpc"] = agg["agg_spend"] / agg["agg_clicks"].replace(0, np.nan)
-    agg["agg_cpm"] = agg["agg_spend"] / agg["agg_impressions"].replace(0, np.nan) * 1000
-    agg["agg_ctr"] = agg["agg_clicks"] / agg["agg_impressions"].replace(0, np.nan) * 100
-    agg["agg_roas"] = agg["agg_revenue"] / agg["agg_spend"].replace(0, np.nan)
+    agg["agg_cpc"] = (agg["agg_spend"] / agg["agg_clicks"].replace(0, np.nan)).fillna(0)
+    agg["agg_cpm"] = (agg["agg_spend"] / agg["agg_impressions"].replace(0, np.nan) * 1000).fillna(0)
+    agg["agg_ctr"] = (agg["agg_clicks"] / agg["agg_impressions"].replace(0, np.nan) * 100).fillna(0)
+    agg["agg_roas"] = (agg["agg_revenue"] / agg["agg_spend"].replace(0, np.nan)).fillna(0)
 
-    # lags on aggregate
     agg["agg_spend_lag_1"] = agg["agg_spend"].shift(1)
     agg["agg_revenue_lag_1"] = agg["agg_revenue"].shift(1)
 
-    # rolling on aggregate
     for w in [7, 14, 30]:
-        agg[f"agg_revenue_{w}d_sum"] = agg["agg_revenue"].shift(1).rolling(w).sum()
-        agg[f"agg_spend_{w}d_sum"] = agg["agg_spend"].shift(1).rolling(w).sum()
+        agg[f"agg_revenue_{w}d_sum"] = (
+            agg["agg_revenue"].shift(1).rolling(w, min_periods=1).sum().fillna(0)
+        )
+        agg[f"agg_spend_{w}d_sum"] = (
+            agg["agg_spend"].shift(1).rolling(w, min_periods=1).sum().fillna(0)
+        )
 
     return agg
 
 
-def merge_features(campaign_features, aggregate_features):
+NON_FEATURE_COLS = [
+    "date", "campaign_name", "channel", "campaign_type",
+    "spend", "revenue", "clicks", "impressions", "conversions",
+    "daily_budget"
+]
+
+
+def merge_features(campaign_features, aggregate_features,
+                   training_feature_cols=None):
     merged = campaign_features.merge(
         aggregate_features, on="date", how="left"
     )
 
-    # drop rows with any null in feature columns (from shifts/rollings)
+    if training_feature_cols is not None:
+        for col in training_feature_cols:
+            if col not in merged.columns:
+                merged[col] = 0
+        merged = merged[
+            [c for c in merged.columns if c not in training_feature_cols]
+            + training_feature_cols
+        ]
+        merged.dropna(subset=training_feature_cols, inplace=True)
+        merged.reset_index(drop=True, inplace=True)
+        return merged, training_feature_cols
+
     feature_cols = [c for c in merged.columns
-                    if c not in ["date", "campaign_name", "channel",
-                                 "campaign_type", "spend", "revenue",
-                                 "clicks", "impressions", "conversions",
-                                 "daily_budget"]]
+                    if c not in NON_FEATURE_COLS]
     merged.dropna(subset=feature_cols, inplace=True)
     merged.reset_index(drop=True, inplace=True)
     return merged, feature_cols
