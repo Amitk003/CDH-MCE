@@ -26,6 +26,15 @@ CAMPAIGN_TYPE_PATTERNS = [
     (r"(?i)demand.*gen", "Demand_Gen"),
 ]
 
+CHANNEL_TYPE_MAPPING = {
+    "SEARCH": "Search",
+    "PERFORMANCE_MAX": "PMax",
+    "DISPLAY": "Display",
+    "VIDEO": "Video",
+    "DEMAND_GEN": "Demand_Gen",
+    "SHOPPING": "Shopping",
+}
+
 
 def classify_campaign_type(campaign_name, channel_type=None):
     if pd.isna(campaign_name):
@@ -36,15 +45,7 @@ def classify_campaign_type(campaign_name, channel_type=None):
             return label
     if channel_type and pd.notna(channel_type):
         ct = str(channel_type).upper()
-        mapping = {
-            "SEARCH": "Search",
-            "PERFORMANCE_MAX": "PMax",
-            "DISPLAY": "Display",
-            "VIDEO": "Video",
-            "DEMAND_GEN": "Demand_Gen",
-            "SHOPPING": "Shopping",
-        }
-        return mapping.get(ct, "Other")
+        return CHANNEL_TYPE_MAPPING.get(ct, "Other")
     return "Other"
 
 
@@ -62,7 +63,10 @@ def read_bing(filepath):
         "DailyBudget": "daily_budget",
     }, inplace=True)
     df["channel"] = "bing_ads"
-    df["campaign_type"] = df["campaign_name"].apply(classify_campaign_type)
+    df["campaign_type"] = [
+        classify_campaign_type(n, t)
+        for n, t in zip(df["campaign_name"], df["campaign_type_raw"])
+    ]
     return df
 
 
@@ -81,12 +85,10 @@ def read_google(filepath):
     }, inplace=True)
     df["spend"] = df["metrics_cost_micros"] / 1_000_000
     df["channel"] = "google_ads"
-    df["campaign_type"] = df.apply(
-        lambda row: classify_campaign_type(
-            row["campaign_name"], row.get("campaign_type_raw")
-        ),
-        axis=1,
-    )
+    df["campaign_type"] = [
+        classify_campaign_type(n, t)
+        for n, t in zip(df["campaign_name"], df["campaign_type_raw"])
+    ]
     return df
 
 
@@ -102,9 +104,30 @@ def read_meta(filepath):
         "daily_budget": "daily_budget",
     }, inplace=True)
     df["channel"] = "meta_ads"
-    df["campaign_type"] = df["campaign_name"].apply(classify_campaign_type)
+    df["campaign_type"] = [
+        classify_campaign_type(n, None)
+        for n in df["campaign_name"]
+    ]
     df["conversions"] = np.nan
     return df
+
+
+# Ordered list of (keyword tuples, reader function) so we check
+# more specific patterns first and cover aliases (microsoft, ms, etc.)
+READER_RULES = [
+    (["google", "ga4", "adwords"], read_google),
+    (["meta", "facebook", "fb"], read_meta),
+    (["bing", "microsoft", "ms", "microsoft_ads"], read_bing),
+]
+
+
+def _match_reader(fname):
+    fname = fname.lower()
+    for keywords, reader in READER_RULES:
+        for kw in keywords:
+            if kw in fname:
+                return reader
+    return None
 
 
 def load_all_data(data_dir):
@@ -114,24 +137,13 @@ def load_all_data(data_dir):
     if not csv_files:
         raise FileNotFoundError(f"No CSV files found in {data_dir}")
 
-    readers = {
-        "bing": read_bing,
-        "google": read_google,
-        "meta": read_meta,
-    }
-
     all_dfs = []
     for fpath in csv_files:
-        fname = fpath.name.lower()
-        loaded = False
-        for key, reader in readers.items():
-            if key in fname:
-                df = reader(fpath)
-                all_dfs.append(df)
-                loaded = True
-                break
-        if not loaded:
-            print(f"Warning: Unknown CSV format, skipping {fpath.name}")
+        reader = _match_reader(fpath.name)
+        if reader is None:
+            continue
+        df = reader(fpath)
+        all_dfs.append(df)
 
     if not all_dfs:
         raise ValueError("No matching CSV files found in data directory")
@@ -166,12 +178,15 @@ def fill_missing_dates(df):
         "conversions": "sum",
         "daily_budget": "first",
     })
-    all_dates = pd.date_range(
-        start=df["date"].min(), end=df["date"].max(), freq="D"
-    )
+
+    global_max_date = df["date"].max()
     result_dfs = []
     for name, group in df.groupby("campaign_name", sort=False):
-        group = group.set_index("date").reindex(all_dates)
+        campaign_start = group["date"].min()
+        campaign_dates = pd.date_range(
+            start=campaign_start, end=global_max_date, freq="D"
+        )
+        group = group.set_index("date").reindex(campaign_dates)
         group["campaign_name"] = name
         for col in ["channel", "campaign_type"]:
             if col in group.columns:
