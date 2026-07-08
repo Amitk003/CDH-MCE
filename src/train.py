@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import lightgbm as lgb
 
-from ingest import load_all_data, fill_missing_dates
+from ingest import load_all_data, fill_missing_dates, validate_campaigns
 from features import build_features, build_aggregate_features, merge_features
 from targets import build_targets, HORIZONS
 from utils import set_seeds
@@ -47,6 +47,7 @@ def run_training(data_dir, model_out, params=None):
     df = load_all_data(data_dir)
     df = fill_missing_dates(df)
     print(f"  Raw + filled: {df.shape}")
+    validate_campaigns(df)
 
     print("Building features...")
     cf = build_features(df)

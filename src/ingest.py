@@ -1,3 +1,4 @@
+import csv
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -121,12 +122,27 @@ READER_RULES = [
 ]
 
 
-def _match_reader(fname):
+# Column signatures per reader for fallback detection when keywords don't match
+READER_SIGNATURES = {
+    read_google: {"segments_date", "metrics_cost_micros", "campaign_advertising_channel_type"},
+    read_meta: {"date_start", "cpc", "cpm", "daily_budget"},
+    read_bing: {"TimePeriod", "CampaignId", "CampaignType"},
+}
+
+
+def _match_reader(fname, csv_columns=None):
     fname = fname.lower()
     for keywords, reader in READER_RULES:
         for kw in keywords:
             if kw in fname:
                 return reader
+
+    if csv_columns is not None:
+        cols_lower = {c.lower() for c in csv_columns}
+        for reader, sig in READER_SIGNATURES.items():
+            if sig.issubset(cols_lower) or sig.issubset(set(csv_columns)):
+                return reader
+
     return None
 
 
@@ -141,7 +157,13 @@ def load_all_data(data_dir):
     for fpath in csv_files:
         reader = _match_reader(fpath.name)
         if reader is None:
-            continue
+            with open(fpath, encoding="utf-8-sig") as f:
+                sample = f.readline(65536)
+            head = list(csv.reader([sample]))[0] if sample.strip() else []
+            reader = _match_reader(fpath.name, csv_columns=head)
+            if reader is None:
+                print(f"  WARNING: No reader matched for {fpath.name}, skipping")
+                continue
         df = reader(fpath)
         all_dfs.append(df)
 
@@ -162,6 +184,48 @@ def load_all_data(data_dir):
     df.reset_index(drop=True, inplace=True)
 
     return df
+
+
+def validate_campaigns(df):
+    issues = []
+
+    for name, group in df.groupby("campaign_name", sort=False):
+        group = group.sort_values("date")
+
+        neg_spend = group[group["spend"] < -0.001]
+        for _, r in neg_spend.iterrows():
+            issues.append(
+                f"  [{name}] Negative spend ({r['spend']}) on {r['date']}"
+            )
+
+        neg_rev = group[group["revenue"] < -0.001]
+        for _, r in neg_rev.iterrows():
+            issues.append(
+                f"  [{name}] Negative revenue ({r['revenue']}) on {r['date']}"
+            )
+
+        dups = group[group.duplicated(subset=["date"], keep=False)]
+        if len(dups) > 0:
+            dup_dates = dups["date"].unique()
+            issues.append(
+                f"  [{name}] Duplicate entries for dates: {list(dup_dates[:5])}"
+            )
+
+        total_rev = group["revenue"].sum()
+        total_spend = group["spend"].sum()
+        if total_spend < 0.01 and total_rev < 0.01:
+            issues.append(
+                f"  [{name}] Campaign has no spend or revenue (all zeros)"
+            )
+
+    if issues:
+        print("Campaign validation issues found:")
+        for msg in issues:
+            print(msg)
+    else:
+        print("Campaign validation passed: no issues found")
+
+    return issues
 
 
 def fill_missing_dates(df):
