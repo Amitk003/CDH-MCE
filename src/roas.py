@@ -19,13 +19,21 @@ def compute_roas_range(revenue_lower, revenue_upper, spend_lower, spend_upper):
     return float(roas_lower), float(roas_upper)
 
 
+COL_ORDER = [
+    "horizon", "level", "campaign_name", "channel", "campaign_type",
+    "revenue_lower", "revenue_upper",
+    "spend_lower", "spend_upper",
+    "roas_lower", "roas_upper",
+]
+
+
 def build_predictions(forecasts, horizons):
     """
     Build the final predictions DataFrame from raw forecast dicts.
 
     forecasts is a list of dicts with keys:
-      horizon, level, group, revenue_lower, revenue_upper,
-      spend_lower, spend_upper
+      horizon, level, campaign_name, channel, campaign_type,
+      revenue_lower, revenue_upper, spend_lower, spend_upper
     """
     rows = []
     for fc in forecasts:
@@ -40,11 +48,17 @@ def build_predictions(forecasts, horizons):
         rows.append({
             "horizon": h,
             "level": fc["level"],
-            "group": fc["group"],
+            "campaign_name": fc["campaign_name"],
+            "channel": fc["channel"],
+            "campaign_type": fc["campaign_type"],
             "revenue_lower": round(rl, 2),
             "revenue_upper": round(ru, 2),
+            "spend_lower": round(sl, 2),
+            "spend_upper": round(su, 2),
             "roas_lower": round(roas_lower, 4),
             "roas_upper": round(roas_upper, 4),
         })
 
-    return pd.DataFrame(rows)
+    result = pd.DataFrame(rows)
+    result = result[COL_ORDER]
+    return result

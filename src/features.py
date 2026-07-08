@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 
+from utils import set_seeds
+
 
 LAG_DAYS = [1, 7, 14, 28]
 ROLLING_WINDOWS = [7, 14, 30]
@@ -49,6 +51,7 @@ def _compute_rolling_metrics(group, windows):
 
 
 def build_features(df):
+    set_seeds()
     df = df.copy()
     df.sort_values(["campaign_name", "date"], inplace=True)
 
@@ -102,6 +105,7 @@ def build_features(df):
 
 
 def build_aggregate_features(df):
+    set_seeds()
     agg = df.groupby("date", as_index=False).agg({
         "spend": "sum",
         "revenue": "sum",

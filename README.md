@@ -30,6 +30,7 @@ python src/train.py --data-dir ./data --model-out ./pickle/model.pkl
 ### Run prediction (command line)
 
 ```bash
+chmod +x run.sh          # make sure it is executable (run once)
 ./run.sh ./data ./pickle/model.pkl ./output/predictions.csv
 ```
 
@@ -38,6 +39,15 @@ Optional: adjust budgets with --budget-multiplier:
 ```bash
 python src/predict.py --data-dir ./data --model ./pickle/model.pkl --output ./output/predictions.csv --budget-multiplier 1.5
 ```
+
+Optional: generate AI-powered summary of the forecast (requires Groq API key):
+
+```bash
+python src/predict.py --data-dir ./data --model ./pickle/model.pkl --output ./output/predictions.csv --llm-api-key gsk_...
+```
+
+> **Note:** The `--llm-api-key` flag is optional and disabled by default.
+> The automated pipeline (`run.sh`) does not make network calls.
 
 ### Launch the UI
 
@@ -72,19 +82,23 @@ docs/              - Documentation
 
 ## Output format
 
-The prediction output is a CSV file with these columns:
+The prediction output is a CSV file with these columns (same identifying columns as the training data, plus forecasted metrics):
 
 | Column | Description |
 |--------|-------------|
 | horizon | Forecast window in days (30, 60, or 90) |
 | level | Aggregation level (aggregate, channel, campaign_type, or campaign) |
-| group | Name of the group (e.g., "all", "google_ads", "Search") |
+| campaign_name | Campaign name ("all" at aggregate or channel/campaign_type levels) |
+| channel | Channel name ("all" at aggregate or campaign_type levels) |
+| campaign_type | Campaign type ("all" at aggregate or channel levels) |
 | revenue_lower | Lower bound of revenue forecast |
 | revenue_upper | Upper bound of revenue forecast |
+| spend_lower | Lower bound of spend forecast |
+| spend_upper | Upper bound of spend forecast |
 | roas_lower | Lower bound of ROAS forecast (revenue / spend) |
 | roas_upper | Upper bound of ROAS forecast |
 
 ## Requirements
 
-- Python 3.10 or higher
+- Python 3.11.9 (tested; any 3.10+ should work)
 - See requirements.txt for all dependencies
