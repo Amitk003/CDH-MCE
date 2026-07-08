@@ -24,7 +24,15 @@ st.set_page_config(
 def load_forecast(data_dir, model_path, budget_multiplier=1.0):
     output_path = "output/ui_predictions.csv"
     run_inference(data_dir, model_path, output_path, budget_multiplier=budget_multiplier)
-    return pd.read_csv(output_path)
+    pdf = pd.read_csv(output_path)
+    pdf["group"] = np.select(
+        [pdf["level"] == "aggregate",
+         pdf["level"] == "channel",
+         pdf["level"] == "campaign_type"],
+        [pdf["campaign_name"], pdf["channel"], pdf["campaign_type"]],
+        default=pdf["campaign_name"],
+    )
+    return pdf
 
 
 def get_llm_insights(forecast_df, groq_client, model_name="llama-3.3-70b-versatile"):
